@@ -69,6 +69,7 @@ String secondAllele = "ALLELE2";
 String separators  = " \t";
 
 bool   useStandardErrors = false;
+bool   randomeffects = false;
 bool   useStrand = false;
 bool   averageFrequencies = false;
 bool   minMaxFrequencies = false;
@@ -208,12 +209,6 @@ void ClearAll()
    markerLookup.Clear();
    statistics.Dimension(0);
    weights.Dimension(0);
-   
-   weightssq.Dimension(0);
-   tausq.Dimension(0);
-   dlstats.Dimension(0);
-   dlweight.Dimension(0);
-
    allele1.Dimension(0);
    allele2.Dimension(0);
    frequencies.Dimension(0);
@@ -560,9 +555,6 @@ void Analyze(bool heterogeneity)
       printf("\n");
       }
 
-   // do random effects all the time
-   bool randomeffects = true;
-
    // RANDOM EFFECTS
    if (randomeffects && heterogeneity && useStandardErrors)
       {
@@ -575,6 +567,7 @@ void Analyze(bool heterogeneity)
       for (int i = 0; i < statistics.Length(); i++)
       {
          tausq[i] = ( hetStatistic[i] - hetDegreesOfFreedom[i] + 1 ) / (weights[i] - (weightssq[i]/weights[i]));
+         tausq[i] = tausq[i] > 0.0 ? tausq[i] : 0.0;
       }
 
       dlstats.Dimension(statistics.Length());
@@ -630,10 +623,10 @@ void Analyze(bool heterogeneity)
               minMaxFrequencies ? "MinFreq\tMaxFreq\t" : "",
               useStandardErrors ? "Effect" : "Weight",
               useStandardErrors ? "StdErr" : "Zscore",
-              logPValue ? "log(P)" : "Pvalue",
+              logPValue ? "logPvalue" : "Pvalue",
               heterogeneity ? "\tHetISq\tHetChiSq\tHetDf\t" : "",
               heterogeneity ? (logPValue ? "logHetP" : "HetPVal") : "",
-              randomeffects ? "\tRE\tREse\tREP" : ""
+              randomeffects ? "\tEffectRandom\tStdErrRandom\tPvalueRandom" : ""
           );
 
    for (int i = 0; i < customVariables.Length(); i++)
@@ -698,9 +691,9 @@ void Analyze(bool heterogeneity)
             fprintf(f, "%.4f\t%.4f\t", minFrequency, maxFrequency);
 
          fprintf(f, "%.*f\t%.*f\t%s\t%s",
-                  useStandardErrors ? 4 : 2,
+                  useStandardErrors ? 7 : 2,
                   useStandardErrors ? statistics[marker] / weights[marker] : weights[marker],
-                  useStandardErrors ? 4 : 3,
+                  useStandardErrors ? 7 : 3,
                   useStandardErrors ? sqrt(1.0 / weights[marker]) : statistic,
                   (const char *) pvalue,
                   (const char *) direction);
@@ -717,13 +710,13 @@ void Analyze(bool heterogeneity)
 
             if (logPValue) p = (p < 1.0) ? log(p) / log(10.0) : 0.0;
 
-            fprintf(f, "\t%.1f\t%.3f\t%d\t%.4g",
+            fprintf(f, "\t%.1f\t%.7f\t%d\t%.4g",
                         I2, hetStatistic[marker], hetDegreesOfFreedom[marker] - 1, p);
 
             if(randomeffects)
             {
-               PrintablePvalue(pvalue, dlstats[marker] / dlweight[marker]);
-               fprintf(f, "\t%.8f\t%.8f\t%s",
+               PrintablePvalue(pvalue, dlstats[marker] / sqrt(dlweight[marker]));
+               fprintf(f, "\t%.7f\t%.7f\t%s",
                   dlstats[marker] / dlweight[marker], sqrt(1.0 / dlweight[marker]), (const char *) pvalue
                );
             }
@@ -1216,7 +1209,6 @@ void ProcessFile(String & filename, FileSummary * history)
          {
          statistics[marker] += w * z;
          weights[marker] += w;
-         weightssq[marker] += w * w;
          if (genomicControl)
             if (genomicControlFilter.Length() == 0 || genomicControlFilter[marker] == 'Y')
                chiSquareds.Push(z * z * w);
@@ -1857,7 +1849,9 @@ void RunScript(FILE * file)
           tokens[0].MatchesBeginningOf("ANALYSE") == 0) &&
           tokens[0].Length() > 1)
          {
-         Analyze(tokens.Length() > 1 && tokens[1].MatchesBeginningOf("HETEROGENEITY") == 0);
+            bool het = tokens.Length() > 1 && tokens[1].MatchesBeginningOf("HETEROGENEITY") == 0;
+            randomeffects = tokens.Length() > 1 && tokens[1].MatchesBeginningOf("RANDOM") == 0;
+         Analyze(het || randomeffects);
          continue;
          }
 
