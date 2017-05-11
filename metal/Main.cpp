@@ -40,6 +40,9 @@ IntArray  hetDegreesOfFreedom;
 
 // Additional code for random effects model
 Vector    tausq;
+Vector    weightssq;
+Vector    dlstats;
+Vector    dlweight;
 
 
 StringArray allele1;
@@ -205,6 +208,12 @@ void ClearAll()
    markerLookup.Clear();
    statistics.Dimension(0);
    weights.Dimension(0);
+   
+   weightssq.Dimension(0);
+   tausq.Dimension(0);
+   dlstats.Dimension(0);
+   dlweight.Dimension(0);
+
    allele1.Dimension(0);
    allele2.Dimension(0);
    frequencies.Dimension(0);
@@ -531,6 +540,10 @@ void Analyze(bool heterogeneity)
       hetStatistic.Dimension(statistics.Length());
       hetStatistic.Zero();
 
+      weightssq.Dimension(statistics.Length());
+      weightssq.Zero();
+
+
       FileSummary * pointer = processedFiles;
 
       while (pointer != NULL)
@@ -547,13 +560,53 @@ void Analyze(bool heterogeneity)
       printf("\n");
       }
 
+   // do random effects all the time
+   bool randomeffects = true;
 
    // RANDOM EFFECTS
-   if (randomeffects)
-   {
+   if (randomeffects && heterogeneity && useStandardErrors)
+      {
       printf("###########################################################################\n");
-      printf("## Running third pass to get heterogeneity...\n");
-   }
+      printf("## Calculating tau-square...\n");
+
+      tausq.Dimension(statistics.Length());
+      tausq.Zero();
+
+      for (int i = 0; i < statistics.Length(); i++)
+      {
+         tausq[i] = ( hetStatistic[i] - hetDegreesOfFreedom[i] + 1 ) / (weights[i] - (weightssq[i]/weights[i]));
+      }
+
+      dlstats.Dimension(statistics.Length());
+      dlstats.Zero();
+
+      dlweight.Dimension(statistics.Length());
+      dlweight.Zero();
+
+      printf("###########################################################################\n");
+      printf("## Third pass to calculate DerSimonian-Laird statistics...\n");
+
+
+      FileSummary * pointer = processedFiles;
+
+      while (pointer != NULL)
+         {
+         if (!RandomReProcessFile(pointer))
+            {
+            printf("## WARNING: Random effects analysis failed...\n");
+            randomeffects = false;
+            break;
+            }
+
+         pointer = pointer->next;
+         }
+      printf("\n");
+
+      }
+
+
+
+
 
    String filename;
    filename.printf(outfile, outfileround++);
@@ -572,14 +625,16 @@ void Analyze(bool heterogeneity)
       return;
       }
 
-   fprintf(f, "MarkerName\tAllele1\tAllele2\t%s%s%s\t%s\t%s\tDirection%s%s",
+   fprintf(f, "MarkerName\tAllele1\tAllele2\t%s%s%s\t%s\t%s\tDirection%s%s%s",
               averageFrequencies ? "Freq1\tFreqSE\t" : "",
               minMaxFrequencies ? "MinFreq\tMaxFreq\t" : "",
               useStandardErrors ? "Effect" : "Weight",
               useStandardErrors ? "StdErr" : "Zscore",
-              logPValue ? "log(P)" : "P-value",
+              logPValue ? "log(P)" : "Pvalue",
               heterogeneity ? "\tHetISq\tHetChiSq\tHetDf\t" : "",
-              heterogeneity ? (logPValue ? "logHetP" : "HetPVal") : "");
+              heterogeneity ? (logPValue ? "logHetP" : "HetPVal") : "",
+              randomeffects ? "\tRE\tREse\tREP" : ""
+          );
 
    for (int i = 0; i < customVariables.Length(); i++)
       fprintf(f, "\t%s", (const char *) customVariables[i]);
@@ -664,6 +719,15 @@ void Analyze(bool heterogeneity)
 
             fprintf(f, "\t%.1f\t%.3f\t%d\t%.4g",
                         I2, hetStatistic[marker], hetDegreesOfFreedom[marker] - 1, p);
+
+            if(randomeffects)
+            {
+               PrintablePvalue(pvalue, dlstats[marker] / dlweight[marker]);
+               fprintf(f, "\t%.8f\t%.8f\t%s",
+                  dlstats[marker] / dlweight[marker], sqrt(1.0 / dlweight[marker]), (const char *) pvalue
+               );
+            }
+
             }
 
          for (int j = 0; j < customVariables.Length(); j++)
@@ -1152,6 +1216,7 @@ void ProcessFile(String & filename, FileSummary * history)
          {
          statistics[marker] += w * z;
          weights[marker] += w;
+         weightssq[marker] += w * w;
          if (genomicControl)
             if (genomicControlFilter.Length() == 0 || genomicControlFilter[marker] == 'Y')
                chiSquareds.Push(z * z * w);
@@ -1473,6 +1538,7 @@ bool ReProcessFile(FileSummary * history)
 
          hetStatistic[marker] += (z - e) * (z - e) * w / history->genomicControl;
          hetDegreesOfFreedom[marker]++;
+         weightssq[marker] += w * w;
          }
 
       processedMarkers++;
@@ -1541,7 +1607,7 @@ bool RandomReProcessFile(FileSummary * history)
 
    if (firstColumn >= 0 && secondColumn < 0)
       {
-      printf("## ERROR: Heterogeneity analysis requires both allele labels\n\n");
+      printf("## ERROR: Random effects analysis requires both allele labels\n\n");
       ifclose(f);
       return false;
       }
@@ -1585,36 +1651,16 @@ bool RandomReProcessFile(FileSummary * history)
       if (marker < 0)
          break;
 
-      double w, z;
+      double w, z, sd;
 
       if (!useStandardErrors)
          {
-         long double p = tokens[pvalueColumn].AsLongDouble();
-
-         if (p <= 0 || p > 1.0)
             continue;
-
-         z = -ninv(p * 0.5);
-         w = weightColumn >= 0 ? tokens[weightColumn].AsDouble() : history->weight;
-
-         if (!history->logTransform && effectColumn >= 0 && tokens[effectColumn][0] == '-')
-            z *= -1;
-
-         if (history->logTransform)
-            {
-            double eff = tokens[effectColumn].AsDouble();
-
-            if (eff <= 0.0)
-               continue;
-
-            if (eff < 1.0)
-               z *= -1;
-            }
          }
       else
          {
          double eff = tokens[effectColumn].AsDouble();
-         double sd  = tokens[stderrColumn].AsDouble();
+         sd         = tokens[stderrColumn].AsDouble();
 
          if (history->logTransform)
             {
@@ -1666,21 +1712,12 @@ bool RandomReProcessFile(FileSummary * history)
 
       if (!useStandardErrors)
          {
-         if (weights[marker] == 0.0) continue;
-
-         double ez = sqrt(w) * statistics[marker] / weights[marker];
-
-         z /= sqrt(history->genomicControl);
-
-         hetStatistic[marker] += (z - ez) * (z - ez);
-         hetDegreesOfFreedom[marker]++;
+            continue;
          }
       else
          {
-         double e = statistics[marker] / weights[marker];
-
-         hetStatistic[marker] += (z - e) * (z - e) * w / history->genomicControl;
-         hetDegreesOfFreedom[marker]++;
+            dlstats[marker] += z / (sd * sd + tausq[marker]);
+            dlweight[marker] += 1.0 / (sd * sd + tausq[marker]);
          }
 
       processedMarkers++;
