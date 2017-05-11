@@ -37,6 +37,14 @@ StringArray customLabels;
 Vector    hetStatistic;
 IntArray  hetDegreesOfFreedom;
 
+
+// Additional code for random effects model
+Vector    tausq;
+Vector    weightssq;
+Vector    dlstats;
+Vector    dlweight;
+
+
 StringArray allele1;
 StringArray allele2;
 String      original_flipped;
@@ -61,6 +69,7 @@ String secondAllele = "ALLELE2";
 String separators  = " \t";
 
 bool   useStandardErrors = false;
+bool   randomeffects = false;
 bool   useStrand = false;
 bool   averageFrequencies = false;
 bool   minMaxFrequencies = false;
@@ -526,6 +535,10 @@ void Analyze(bool heterogeneity)
       hetStatistic.Dimension(statistics.Length());
       hetStatistic.Zero();
 
+      weightssq.Dimension(statistics.Length());
+      weightssq.Zero();
+
+
       FileSummary * pointer = processedFiles;
 
       while (pointer != NULL)
@@ -541,6 +554,52 @@ void Analyze(bool heterogeneity)
          }
       printf("\n");
       }
+
+   // RANDOM EFFECTS
+   if (randomeffects && heterogeneity && useStandardErrors)
+      {
+      printf("###########################################################################\n");
+      printf("## Calculating tau-square...\n");
+
+      tausq.Dimension(statistics.Length());
+      tausq.Zero();
+
+      for (int i = 0; i < statistics.Length(); i++)
+      {
+         tausq[i] = ( hetStatistic[i] - hetDegreesOfFreedom[i] + 1 ) / (weights[i] - (weightssq[i]/weights[i]));
+         tausq[i] = tausq[i] > 0.0 ? tausq[i] : 0.0;
+      }
+
+      dlstats.Dimension(statistics.Length());
+      dlstats.Zero();
+
+      dlweight.Dimension(statistics.Length());
+      dlweight.Zero();
+
+      printf("###########################################################################\n");
+      printf("## Third pass to calculate DerSimonian-Laird statistics...\n");
+
+
+      FileSummary * pointer = processedFiles;
+
+      while (pointer != NULL)
+         {
+         if (!RandomReProcessFile(pointer))
+            {
+            printf("## WARNING: Random effects analysis failed...\n");
+            randomeffects = false;
+            break;
+            }
+
+         pointer = pointer->next;
+         }
+      printf("\n");
+
+      }
+
+
+
+
 
    String filename;
    filename.printf(outfile, outfileround++);
@@ -559,14 +618,16 @@ void Analyze(bool heterogeneity)
       return;
       }
 
-   fprintf(f, "MarkerName\tAllele1\tAllele2\t%s%s%s\t%s\t%s\tDirection%s%s",
+   fprintf(f, "MarkerName\tAllele1\tAllele2\t%s%s%s\t%s\t%s\tDirection%s%s%s",
               averageFrequencies ? "Freq1\tFreqSE\t" : "",
               minMaxFrequencies ? "MinFreq\tMaxFreq\t" : "",
               useStandardErrors ? "Effect" : "Weight",
               useStandardErrors ? "StdErr" : "Zscore",
-              logPValue ? "log(P)" : "P-value",
+              logPValue ? "logPvalue" : "Pvalue",
               heterogeneity ? "\tHetISq\tHetChiSq\tHetDf\t" : "",
-              heterogeneity ? (logPValue ? "logHetP" : "HetPVal") : "");
+              heterogeneity ? (logPValue ? "logHetP" : "HetPVal") : "",
+              randomeffects ? "\tEffectRandom\tStdErrRandom\tPvalueRandom" : ""
+          );
 
    for (int i = 0; i < customVariables.Length(); i++)
       fprintf(f, "\t%s", (const char *) customVariables[i]);
@@ -630,9 +691,9 @@ void Analyze(bool heterogeneity)
             fprintf(f, "%.4f\t%.4f\t", minFrequency, maxFrequency);
 
          fprintf(f, "%.*f\t%.*f\t%s\t%s",
-                  useStandardErrors ? 4 : 2,
+                  useStandardErrors ? 7 : 2,
                   useStandardErrors ? statistics[marker] / weights[marker] : weights[marker],
-                  useStandardErrors ? 4 : 3,
+                  useStandardErrors ? 7 : 3,
                   useStandardErrors ? sqrt(1.0 / weights[marker]) : statistic,
                   (const char *) pvalue,
                   (const char *) direction);
@@ -649,8 +710,17 @@ void Analyze(bool heterogeneity)
 
             if (logPValue) p = (p < 1.0) ? log(p) / log(10.0) : 0.0;
 
-            fprintf(f, "\t%.1f\t%.3f\t%d\t%.4g",
+            fprintf(f, "\t%.1f\t%.7f\t%d\t%.4g",
                         I2, hetStatistic[marker], hetDegreesOfFreedom[marker] - 1, p);
+
+            if(randomeffects)
+            {
+               PrintablePvalue(pvalue, dlstats[marker] / sqrt(dlweight[marker]));
+               fprintf(f, "\t%.7f\t%.7f\t%s",
+                  dlstats[marker] / dlweight[marker], sqrt(1.0 / dlweight[marker]), (const char *) pvalue
+               );
+            }
+
             }
 
          for (int j = 0; j < customVariables.Length(); j++)
@@ -1460,6 +1530,7 @@ bool ReProcessFile(FileSummary * history)
 
          hetStatistic[marker] += (z - e) * (z - e) * w / history->genomicControl;
          hetDegreesOfFreedom[marker]++;
+         weightssq[marker] += w * w;
          }
 
       processedMarkers++;
@@ -1483,6 +1554,188 @@ bool ReProcessFile(FileSummary * history)
 
    return true;
    }
+
+
+bool RandomReProcessFile(FileSummary * history)
+   {
+   if (history->processedMarkers == 0)
+      return true;
+
+   IFILE f = ifopen(history->filename, "rb");
+
+   if (f == NULL)
+      {
+      printf("## Failed to open file '%s'\n", (const char *) history->filename);
+      return false;
+      }
+
+   printf("## Processing file '%s'\n", (const char *) history->filename);
+
+   String input;
+   StringArray tokens;
+
+   input.ReadLine(f);
+
+   if (input != history->header)
+      {
+      printf("## ERROR: Input file has changed since analysis started\n\n");
+      ifclose(f);
+      return false;
+      }
+
+   int markerColumn = history->markerColumn;
+   int pvalueColumn = history->pvalueColumn;
+   int effectColumn = history->effectColumn;
+   int weightColumn = history->weightColumn;
+   int firstColumn = history->firstColumn;
+   int secondColumn = history->secondColumn;
+   int stderrColumn = history->stderrColumn;
+   int freqColumn = history->freqColumn;
+   int strandColumn = history->strandColumn;
+   int expectedColumns = history->expectedColumns;
+
+   bool strictColumnCounting = history->strictColumnCounting;
+   bool useStrand = history->useStrand;
+
+   if (firstColumn >= 0 && secondColumn < 0)
+      {
+      printf("## ERROR: Random effects analysis requires both allele labels\n\n");
+      ifclose(f);
+      return false;
+      }
+
+   bool useFrequencies = minMaxFrequencies || averageFrequencies;
+
+   history->filterLabel.Swap(filterLabel);
+   history->filterColumn.Swap(filterColumn);
+   history->filterCondition.Swap(filterCondition);
+   history->filterValue.Swap(filterValue);
+   history->filterAlternate.Swap(filterAlternate);
+   history->filterSets.Swap(filterSets);
+   history->filterCounts.Swap(filterCounts);
+
+   int minColumns = history->minColumns;
+   int processedMarkers = 0;
+
+   String direction;
+   direction.Fill('?', allele1.Length());
+
+   while (!ifeof(f))
+      {
+      if (history->separators.Length() != 1)
+         tokens.ReplaceTokens(input.ReadLine(f).Trim(), history->separators);
+      else
+         tokens.ReplaceColumns(input.ReadLine(f), history->separators[0]);
+
+      if (input[0] == '#') continue;
+
+      if (tokens.Length() != expectedColumns)
+         if (strictColumnCounting)
+            continue;
+
+      if (tokens.Length() < minColumns)
+         continue;
+
+      if (!ApplyFilter(tokens)) continue;
+
+      int marker = markerLookup.Integer(tokens[markerColumn]);
+
+      if (marker < 0)
+         break;
+
+      double w, z, sd;
+
+      if (!useStandardErrors)
+         {
+            continue;
+         }
+      else
+         {
+         double eff = tokens[effectColumn].AsDouble();
+         sd         = tokens[stderrColumn].AsDouble();
+
+         if (history->logTransform)
+            {
+            if (eff <= 0.0)
+               continue;
+
+            eff = log(eff);
+            }
+
+         if (sd <= 0)
+            continue;
+
+         z = eff;
+         w = 1.0 / (sd * sd);
+         }
+
+      double freq = 0.0;
+      if (useFrequencies)
+         freq = tokens[freqColumn].AsDouble();
+
+      if (flip)
+         z *= -1;
+
+      if (firstColumn >= 0 && secondColumn >= 0)
+         {
+         NumbersToLetters(tokens[firstColumn]);
+         NumbersToLetters(tokens[secondColumn]);
+
+         if (useStrand && tokens[strandColumn] == "-")
+            {
+            FlipAllele(tokens[firstColumn]);
+            FlipAllele(tokens[secondColumn]);
+            }
+
+         FlipAlleles(tokens[firstColumn], tokens[secondColumn], z, freq);
+
+         if (allele1[marker] == "")
+            break;
+         else
+            if (tokens[firstColumn] != allele1[marker] ||
+                tokens[secondColumn] != allele2[marker])
+                continue;
+         }
+
+      if (direction[marker] != '?')
+         continue;
+
+      direction[marker] = z == 0.0 ? '0' : (z > 0.0 ? '+' : '-');
+
+      if (!useStandardErrors)
+         {
+            continue;
+         }
+      else
+         {
+            dlstats[marker] += z / (sd * sd + tausq[marker]);
+            dlweight[marker] += 1.0 / (sd * sd + tausq[marker]);
+         }
+
+      processedMarkers++;
+      }
+
+   history->filterLabel.Swap(filterLabel);
+   history->filterColumn.Swap(filterColumn);
+   history->filterCondition.Swap(filterCondition);
+   history->filterValue.Swap(filterValue);
+   history->filterAlternate.Swap(filterAlternate);
+   history->filterSets.Swap(filterSets);
+   history->filterCounts.Swap(filterCounts);
+
+   ifclose(f);
+
+   if (processedMarkers != history->processedMarkers)
+      {
+      printf("## ERROR: Input file has changed since analysis started\n");
+      return false;
+      }
+
+   return true;
+   }
+
+
+
 
 
 void ShowHelp(bool startup)
@@ -1596,7 +1849,9 @@ void RunScript(FILE * file)
           tokens[0].MatchesBeginningOf("ANALYSE") == 0) &&
           tokens[0].Length() > 1)
          {
-         Analyze(tokens.Length() > 1 && tokens[1].MatchesBeginningOf("HETEROGENEITY") == 0);
+            bool het = tokens.Length() > 1 && tokens[1].MatchesBeginningOf("HETEROGENEITY") == 0;
+            randomeffects = tokens.Length() > 1 && tokens[1].MatchesBeginningOf("RANDOM") == 0;
+         Analyze(het || randomeffects);
          continue;
          }
 

@@ -63,4 +63,4 @@ PVAL     PVALUE
 PROCESS magic_SARDINIA.tbl
 
 # Execute meta-analysis
-ANALYZE
+ANALYZE RANDOM

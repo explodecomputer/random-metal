@@ -106,6 +106,7 @@ bool GuessSecondAllele(int marker, String & al1, String & al2);
 void Analyze(bool heterogeneity);
 void ProcessFile(String & filename, FileSummary * history);
 bool ReProcessFile(FileSummary * history);
+bool RandomReProcessFile(FileSummary * history);
 
 // Help!
 void ShowHelp(bool startup = false);
