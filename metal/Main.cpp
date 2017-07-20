@@ -626,7 +626,7 @@ void Analyze(bool heterogeneity)
               logPValue ? "logPvalue" : "Pvalue",
               heterogeneity ? "\tHetISq\tHetChiSq\tHetDf\t" : "",
               heterogeneity ? (logPValue ? "logHetP" : "HetPVal") : "",
-              randomeffects ? "\tEffectRandom\tStdErrRandom\tPvalueRandom" : ""
+              randomeffects ? "\tEffectRandom\tStdErrRandom\tPvalueRandom\ttausq" : ""
           );
 
    for (int i = 0; i < customVariables.Length(); i++)
@@ -716,8 +716,8 @@ void Analyze(bool heterogeneity)
             if(randomeffects)
             {
                PrintablePvalue(pvalue, dlstats[marker] / sqrt(dlweight[marker]));
-               fprintf(f, "\t%.7f\t%.7f\t%s",
-                  dlstats[marker] / dlweight[marker], sqrt(1.0 / dlweight[marker]), (const char *) pvalue
+               fprintf(f, "\t%.7f\t%.7f\t%s\t%.7f",
+                  dlstats[marker] / dlweight[marker], sqrt(1.0 / dlweight[marker]), (const char *) pvalue, tausq[marker]
                );
             }
 
