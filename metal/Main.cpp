@@ -626,7 +626,7 @@ void Analyze(bool heterogeneity)
               logPValue ? "logPvalue" : "Pvalue",
               heterogeneity ? "\tHetISq\tHetChiSq\tHetDf\t" : "",
               heterogeneity ? (logPValue ? "logHetP" : "HetPVal") : "",
-              randomeffects ? "\tEffectRandom\tStdErrRandom\tPvalueRandom\ttausq" : ""
+              randomeffects ? "\tEffectARE\tStdErrARE\tPvalueARE\ttausq\tStdErrMRE\tPvalueMRE" : ""
           );
 
    for (int i = 0; i < customVariables.Length(); i++)
@@ -663,7 +663,7 @@ void Analyze(bool heterogeneity)
          double maxFrequency = minMaxFrequencies ? maxFrequencies[marker] : 0.5;
 
          // double pvalue = 2.0 * ndist(fabs(statistic), true);
-         String pvalue;
+         String pvalue, pvalue2;
          PrintablePvalue(pvalue, statistic);
 
          frequency2 = frequency2 - frequency * frequency;
@@ -716,8 +716,13 @@ void Analyze(bool heterogeneity)
             if(randomeffects)
             {
                PrintablePvalue(pvalue, dlstats[marker] / sqrt(dlweight[marker]));
-               fprintf(f, "\t%.7f\t%.7f\t%s\t%.7f",
-                  dlstats[marker] / dlweight[marker], sqrt(1.0 / dlweight[marker]), (const char *) pvalue, tausq[marker]
+               double phi = hetDegreesOfFreedom[marker] <= 1 ? 1 : (hetStatistic[marker] / (hetDegreesOfFreedom[marker] - 1));
+               phi = phi <= 1 ? 1 : phi;
+               double se2 = sqrt(1.0 / weights[marker]) * phi;
+               PrintablePvalue(pvalue2, (statistics[marker] / weights[marker]) / se2);
+               fprintf(f, "\t%.7f\t%.7f\t%s\t%.7f\t%.7f\t%s",
+                  dlstats[marker] / dlweight[marker], sqrt(1.0 / dlweight[marker]), (const char *) pvalue, tausq[marker], 
+                  se2, (const char *) pvalue2
                );
             }
 
