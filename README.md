@@ -15,3 +15,7 @@ ANALYZE RANDOM
 ```
 
 See the `examples/GlucoseExample/metal2.txt` for an example.
+
+Note that currently there is only a compiled executable available for Linux machines
+
+
