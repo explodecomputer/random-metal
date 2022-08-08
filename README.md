@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/91003955.svg)](https://zenodo.org/badge/latestdoi/91003955)
+
 METAL is a tool for the meta-analysis of genome-wide association studies.
 
 Documentation is available at:
@@ -18,4 +20,4 @@ See the `examples/GlucoseExample/metal2.txt` for an example.
 
 Note that currently there is only a compiled executable available for Linux machines
 
-
+If you use this please cite using the DOI above as well as the original METAL software here https://doi.org/10.1093/bioinformatics/btq340
