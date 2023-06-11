@@ -16,6 +16,12 @@ To run the random effects model it is necessary to issue the following command:
 ANALYZE RANDOM
 ```
 
+This returns
+- Fixed effects: `Effect`, `StdErr` standard error, `pval` p-value
+- Heterogeneity stats: `Direction`, `HetISq` I square statistic, `HetChiSq` Q statistic, `HetDf` Q stat DF, `HetPVal`, p-value for heterogeneity, `tausq` tau squared
+- Additive random effects (DerSimonian-Laird estimator): `EffectARE`, `StdErrARE`, `PvalueARE`
+- Multiplicative random effects (The Effect size for this is the same as the Fixed effects): `StdErrMRE`, `PvalueMRE`
+
 See the `examples/GlucoseExample/metal2.txt` for an example.
 
 Note that currently there is only a compiled executable available for Linux machines
